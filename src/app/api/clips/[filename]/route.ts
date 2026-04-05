@@ -1,15 +1,20 @@
 // GET /api/clips/:filename
 //
-// Serves a clip video file from the tmp/ directory to the browser.
-// This is needed because the browser can't directly access files on the server's
-// filesystem — they have to go through an HTTP endpoint.
+// Streams a clip video file from tmp/ to the browser.
 //
-// Adding ?download=1 to the URL sets Content-Disposition: attachment,
-// which tells the browser to download the file instead of playing it inline.
+// Why streaming instead of readFileSync?
+//   readFileSync loads the entire file into RAM before sending a single byte.
+//   A 200MB clip would spike memory by 200MB per concurrent request.
+//   Streaming sends the file in small chunks (64KB by default), keeping
+//   memory flat regardless of file size — the way web servers are meant to work.
+//
+// Adding ?download=1 triggers Content-Disposition: attachment,
+// which makes the browser save the file instead of playing it inline.
 
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
+import { Readable } from "stream";
 
 export async function GET(
   req: NextRequest,
@@ -17,15 +22,11 @@ export async function GET(
 ) {
   const { filename } = await params;
 
-  // Security: strip any path traversal characters like "../../../etc/passwd"
-  // path.basename removes all directory components, leaving just the filename.
+  // Security: prevent path traversal attacks (e.g. ../../.env.local)
   const safeName = path.basename(filename);
 
-  // Clips are stored under tmp/{jobId}/clips/{filename}.
-  // We search all job directories for a clip with this filename.
+  // Search all job directories for a clip with this filename
   const tmpDir = path.join(process.cwd(), "tmp");
-
-  // Find which job directory contains this clip
   let clipPath: string | null = null;
 
   if (fs.existsSync(tmpDir)) {
@@ -42,17 +43,24 @@ export async function GET(
     return NextResponse.json({ error: "Clip not found." }, { status: 404 });
   }
 
-  // Read the file as a buffer and return it with the correct Content-Type
-  const fileBuffer = fs.readFileSync(clipPath);
-
+  const stat = fs.statSync(clipPath);
   const isDownload = req.nextUrl.searchParams.get("download") === "1";
 
-  return new NextResponse(fileBuffer, {
+  // Create a Node.js ReadStream and convert it to a Web ReadableStream.
+  // Next.js App Router works with the Web Streams API, not Node.js streams,
+  // so we use Readable.toWeb() to bridge between the two.
+  const nodeStream = fs.createReadStream(clipPath);
+  const webStream = Readable.toWeb(nodeStream) as ReadableStream;
+
+  return new NextResponse(webStream, {
     status: 200,
     headers: {
       "Content-Type": "video/mp4",
-      "Content-Length": String(fileBuffer.byteLength),
-      // inline = play in browser; attachment = force download
+      "Content-Length": String(stat.size),
+      // Accept-Ranges tells the browser it can request specific byte ranges.
+      // This is what enables seeking in the HTML5 video player — without it,
+      // you can't skip ahead in a video without downloading everything before it.
+      "Accept-Ranges": "bytes",
       "Content-Disposition": isDownload
         ? `attachment; filename="${safeName}"`
         : `inline; filename="${safeName}"`,

@@ -45,6 +45,13 @@ export function getJob(jobId: string): JobState | undefined {
   return jobs.get(jobId);
 }
 
+// --- UPDATE STATUS ---
+// Flips the top-level job status (pending → processing → done/error).
+export function updateJobStatus(jobId: string, status: JobState["status"]): void {
+  const job = jobs.get(jobId);
+  if (job) job.status = status;
+}
+
 // --- UPDATE STEP ---
 // Marks a specific pipeline step as active, done, or error.
 // The stepId matches the `id` fields in INITIAL_STEPS (e.g. "download", "audio").

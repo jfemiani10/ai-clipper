@@ -1,21 +1,12 @@
 // pipeline.ts — Orchestrates the full processing pipeline for one job.
-//
-// This file is the "conductor": it calls each processing step in order,
-// updates the job's step statuses, and handles errors gracefully.
-//
-// Each step (download, transcribe, analyze, clip) lives in its own file
-// in src/lib/ — the pipeline just wires them together.
-//
-// We run this ASYNC and fire-and-forget from the API route.
-// That means the HTTP response returns immediately with a jobId,
-// and this function keeps running in the Node.js event loop in the background.
 
-import { updateStep, completeJob, failJob } from "./jobManager";
+import { updateStep, completeJob, failJob, updateJobStatus, deleteJob } from "./jobManager";
 import fs from "fs";
 import path from "path";
 
+const CLEANUP_DELAY_MS = 60 * 60 * 1000; // 1 hour — delete temp files after this long
+
 // Helper: mark a step active, run work, mark it done — or mark it error on throw.
-// This pattern avoids repeating try/catch in every step.
 async function runStep<T>(
   jobId: string,
   stepId: string,
@@ -29,19 +20,35 @@ async function runStep<T>(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     failJob(jobId, stepId, `Step "${stepId}" failed: ${message}`);
-    throw err; // Re-throw so the outer try/catch in runPipeline stops execution
+    throw err;
   }
 }
 
+// Deletes the job's temp directory and removes it from the in-memory store.
+// Called automatically 1 hour after the job finishes (success or failure).
+function scheduleCleanup(jobId: string): void {
+  setTimeout(() => {
+    const jobDir = path.join(process.cwd(), "tmp", jobId);
+    try {
+      fs.rmSync(jobDir, { recursive: true, force: true });
+      console.log(`[cleanup] Deleted temp files for job ${jobId}`);
+    } catch (err) {
+      console.error(`[cleanup] Failed to delete ${jobDir}:`, err);
+    }
+    deleteJob(jobId);
+  }, CLEANUP_DELAY_MS);
+}
+
 export async function runPipeline(jobId: string, youtubeUrl: string): Promise<void> {
-  // The working directory for this job's temp files
   const jobDir = path.join(process.cwd(), "tmp", jobId);
   fs.mkdirSync(jobDir, { recursive: true });
 
+  // Flip status to "processing" immediately so the frontend sees it change
+  // from "pending" as soon as the pipeline actually starts running.
+  updateJobStatus(jobId, "processing");
+
   try {
     // ── Step 1: Download ─────────────────────────────────────────────
-    // Imports are lazy (inside the function) to keep startup fast and
-    // make each module easy to replace independently later.
     const { downloadVideo } = await import("./downloader");
     const videoPath = await runStep(jobId, "download", () =>
       downloadVideo(youtubeUrl, jobDir)
@@ -73,7 +80,11 @@ export async function runPipeline(jobId: string, youtubeUrl: string): Promise<vo
 
     completeJob(jobId, clips);
   } catch {
-    // failJob was already called inside runStep — nothing more to do here.
-    // The error is already reflected in the job state for the frontend to read.
+    // failJob was already called inside runStep with the specific step error.
+    // Nothing more to do — the job state is already set to "error".
+  } finally {
+    // Always schedule cleanup, whether the job succeeded or failed.
+    // We still want temp files gone after 1 hour even on error.
+    scheduleCleanup(jobId);
   }
 }
