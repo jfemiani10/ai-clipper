@@ -63,12 +63,13 @@ export async function transcribe(
   await new Promise<void>((resolve, reject) => {
     const args = [
       audioPath,
-      "--model", "base",              // small enough to download quickly, accurate enough for speech
+      "--model", "small",             // 466MB — fits easily in 6GB VRAM, much better accuracy than base
       "--output_format", "json",      // we want structured data, not plain text
       "--output_dir", outDir,         // write the .json file alongside our other temp files
       "--language", "en",             // skip language detection — faster if you know it's English
                                       // remove this line if processing non-English videos
-      "--fp16", "False",              // disable half-precision — required on CPU (no GPU available)
+      "--device", "cuda",             // use the RTX 4050 GPU — ~8-10x faster than CPU
+      // fp16 defaults to True on CUDA, which is correct and faster — no override needed
     ];
 
     const child = spawn(whisper, args, {
