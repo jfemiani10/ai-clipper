@@ -42,6 +42,20 @@ export default function Home() {
 
       try {
         const res = await fetch(`/api/status/${id}`);
+
+        // If the server returned 404 the job was lost (e.g. server restarted).
+        // Stop polling and show an error rather than crashing on missing data.
+        if (!res.ok) {
+          clearInterval(pollingRef.current!);
+          setAppStatus("error");
+          setJob((prev) => ({
+            ...(prev ?? { jobId: id, status: "error", steps: INITIAL_STEPS, clips: [] }),
+            status: "error",
+            error: "Job not found — the server may have restarted. Please try again.",
+          }));
+          return;
+        }
+
         const data: JobState = await res.json();
         setJob(data);
 

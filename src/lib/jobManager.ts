@@ -15,9 +15,16 @@ import { JobState, ProcessingStep, Clip, INITIAL_STEPS } from "./types";
 import { randomUUID } from "crypto"; // Node.js built-in — generates a unique ID like "a1b2c3d4-..."
 
 // The central store: a Map from jobId string → JobState object.
-// Map is used instead of a plain object because it has better performance
-// for frequent inserts/lookups and cleaner iteration.
-const jobs = new Map<string, JobState>();
+//
+// Why global?
+//   In Next.js dev mode, Fast Refresh re-evaluates modules when files change.
+//   A plain `const jobs = new Map()` would reset to empty on every reload,
+//   killing any in-progress jobs. Attaching it to `global` (which is never
+//   reset by module re-evaluation) survives hot reloads.
+//   In production this doesn't matter — modules are only evaluated once.
+const globalForJobs = global as typeof global & { jobs?: Map<string, JobState> };
+if (!globalForJobs.jobs) globalForJobs.jobs = new Map<string, JobState>();
+const jobs = globalForJobs.jobs;
 
 // --- CREATE ---
 // Called when a new YouTube URL is submitted.
