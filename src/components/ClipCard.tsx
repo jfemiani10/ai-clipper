@@ -49,10 +49,13 @@ export default function ClipCard({ clip, index }: ClipCardProps) {
           <span>{duration}s</span>
         </div>
 
-        {/* Download button — the `download` attribute tells the browser to save the file */}
+        {/* Download button
+            ?download=1 triggers Content-Disposition: attachment in our API route,
+            which forces the browser to save the file instead of trying to play it.
+            This is more reliable than the HTML `download` attribute, which some
+            browsers ignore for non-same-origin or streaming responses. */}
         <a
-          href={`/api/clips/${clip.filename}`}
-          download={clip.filename}
+          href={`/api/clips/${clip.filename}?download=1`}
           className="
             mt-1 w-full py-2.5 rounded-xl text-center
             bg-gray-800 hover:bg-gray-700 border border-gray-700

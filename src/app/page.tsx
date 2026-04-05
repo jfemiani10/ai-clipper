@@ -123,9 +123,19 @@ export default function Home() {
         />
       </div>
 
-      {/* Processing steps — shown while running or after error */}
-      {(appStatus === "processing" || appStatus === "error") && job && (
+      {/* Processing steps — shown while running, after error, and after completion */}
+      {(appStatus === "processing" || appStatus === "error" || appStatus === "done") && job && (
         <ProcessingStatus steps={job.steps} error={job.error} />
+      )}
+
+      {/* No clips found message */}
+      {appStatus === "done" && job && job.clips.length === 0 && (
+        <div className="w-full max-w-2xl mt-8 p-6 rounded-2xl bg-gray-900 border border-gray-800 text-center">
+          <p className="text-gray-400">No viral moments found. Try a longer video or one with more dialogue.</p>
+          <button onClick={handleReset} className="mt-4 text-sm text-indigo-400 hover:text-indigo-300 transition">
+            Try another video →
+          </button>
+        </div>
       )}
 
       {/* Clips grid — shown when done */}
